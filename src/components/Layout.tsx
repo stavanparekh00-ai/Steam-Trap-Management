@@ -1,18 +1,7 @@
 import { useState } from 'react';
 import { Link, Outlet, useLocation } from 'react-router-dom';
-import {
-  Database,
-  Droplets,
-  Eraser,
-  Gauge,
-  LogOut,
-  RotateCcw,
-  Settings,
-  Table2,
-} from 'lucide-react';
+import { Database, Droplets, Gauge, RotateCcw, Settings, Table2 } from 'lucide-react';
 import { useSteamTrap } from '../store/SteamTrapContext';
-import { useAuth } from '../auth/AuthContext';
-import { SyncIndicator } from './SyncIndicator';
 
 const NAV = [
   { to: '/', label: 'Dashboard', icon: Gauge },
@@ -23,8 +12,7 @@ const NAV = [
 ];
 
 export function Layout() {
-  const { resetToSeed, clearAll } = useSteamTrap();
-  const { logout } = useAuth();
+  const { resetToSeed } = useSteamTrap();
   const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -45,7 +33,9 @@ export function Layout() {
           </Link>
 
           <div className="flex items-center gap-2">
-            <SyncIndicator />
+            <span className="hidden rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-maroon-100 ring-1 ring-white/20 sm:inline">
+              Demo — changes are not saved
+            </span>
             <div className="relative">
               <button
                 onClick={() => setMenuOpen((o) => !o)}
@@ -75,36 +65,10 @@ export function Layout() {
                       <RotateCcw className="h-4 w-4 text-slate-400" />
                       Reset demo data
                     </button>
-                    <button
-                      onClick={() => {
-                        setMenuOpen(false);
-                        if (
-                          confirm(
-                            'Clear ALL data? This removes every equipment, trap, and PM record and cannot be undone.',
-                          )
-                        ) {
-                          clearAll();
-                        }
-                      }}
-                      className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-red-600 hover:bg-red-50"
-                    >
-                      <Eraser className="h-4 w-4" />
-                      Clear all data
-                    </button>
                   </div>
                 </>
               )}
             </div>
-            <button
-              onClick={() => {
-                if (confirm('Sign out of the dashboard?')) logout();
-              }}
-              className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-maroon-100 hover:bg-white/10"
-              title="Sign out"
-            >
-              <LogOut className="h-4 w-4" />
-              <span className="hidden sm:inline">Sign out</span>
-            </button>
           </div>
         </div>
 

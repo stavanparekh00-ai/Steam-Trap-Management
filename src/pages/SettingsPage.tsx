@@ -10,7 +10,9 @@ export function SettingsPage() {
       <Breadcrumbs items={[{ label: 'Settings' }]} />
       <div>
         <h2 className="text-2xl font-bold text-slate-900">Settings</h2>
-        <p className="text-sm text-slate-500">Application configuration and demo data.</p>
+        <p className="text-sm text-slate-500">
+          Application configuration. This is a read-only demo — changes are not saved between visits.
+        </p>
       </div>
 
       <div className="card p-5">
@@ -25,7 +27,8 @@ export function SettingsPage() {
       <div className="card p-5">
         <h3 className="text-sm font-bold uppercase tracking-wide text-slate-600">Demo Data</h3>
         <p className="mt-2 text-sm text-slate-500">
-          Restore the application to its seeded demonstration dataset.
+          Restore the application to its seeded demonstration dataset. Useful if you want to undo
+          changes made during your current session.
         </p>
         <button
           className="btn-secondary mt-4 text-red-700"

@@ -4,7 +4,6 @@ import {
   useContext,
   useEffect,
   useMemo,
-  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -22,69 +21,13 @@ import type {
   TrapStatus,
 } from '../types';
 import { ISSUE_TYPES, DEFAULT_TRAP_DATASHEET } from '../types';
-import { seedData, DATA_VERSION } from '../data/seedData';
+import { seedData } from '../data/seedData';
 import { todayISO } from '../utils/logic';
 import { upsertTodayKPISnapshot } from '../utils/kpiSnapshots';
 import { uid } from '../utils/id';
-import { isSupabaseConfigured, STATE_ROW_ID, STATE_TABLE, supabase } from '../lib/supabase';
-import { useAuth } from '../auth/AuthContext';
-
-const STORAGE_KEY = 'steam-trap-data-v9';
-
-export type SyncStatus = 'local' | 'loading' | 'saving' | 'saved' | 'error';
-
-function normalizeTrap(
-  t: Partial<Trap> & Pick<Trap, 'id' | 'tag' | 'type' | 'location' | 'equipment_id'>,
-): Trap {
-  return {
-    ...DEFAULT_TRAP_DATASHEET,
-    ...t,
-    id: t.id,
-    tag: t.tag,
-    type: t.type,
-    location: t.location,
-    equipment_id: t.equipment_id,
-  };
-}
-
-function normalizeData(raw: AppData): AppData {
-  return {
-    equipment: (raw.equipment ?? []).map(({ id, name, area }) => ({ id, name, area })),
-    traps: (raw.traps ?? []).map((t) => normalizeTrap(t)),
-    pm_records: raw.pm_records ?? [],
-    maintenance_records: raw.maintenance_records ?? [],
-    shutdown_deferrals: raw.shutdown_deferrals ?? [],
-    engineering_reviews: raw.engineering_reviews ?? [],
-    kpi_snapshots: raw.kpi_snapshots ?? [],
-    data_version: raw.data_version ?? 1,
-  };
-}
-
-export function isStaleData(data: AppData): boolean {
-  return (data.data_version ?? 1) < DATA_VERSION;
-}
-
-function loadData(): AppData {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as AppData;
-      if (parsed?.equipment && parsed?.traps && parsed?.pm_records) {
-        const normalized = normalizeData(parsed);
-        if (!isStaleData(normalized)) {
-          return normalized;
-        }
-      }
-    }
-  } catch {
-    // fall through
-  }
-  return structuredClone(seedData);
-}
 
 interface SteamTrapContextValue {
   data: AppData;
-  syncStatus: SyncStatus;
 
   getEquipment: (id: string) => Equipment | undefined;
   getTrap: (id: string) => Trap | undefined;
@@ -201,126 +144,20 @@ interface SteamTrapContextValue {
   deleteEngineeringReview: (id: string) => void;
 
   resetToSeed: () => void;
-  clearAll: () => void;
 }
 
 const SteamTrapContext = createContext<SteamTrapContextValue | null>(null);
 
-const EMPTY_DATA: AppData = {
-  equipment: [],
-  traps: [],
-  pm_records: [],
-  maintenance_records: [],
-  shutdown_deferrals: [],
-  engineering_reviews: [],
-  kpi_snapshots: [],
-  data_version: DATA_VERSION,
-};
-
 export function SteamTrapProvider({ children }: { children: ReactNode }) {
-  const { authed } = useAuth();
-  const cloud = isSupabaseConfigured;
-
-  const [data, setData] = useState<AppData>(() =>
-    cloud ? structuredClone(EMPTY_DATA) : loadData(),
-  );
-  const [synced, setSynced] = useState(!cloud);
-  const [syncStatus, setSyncStatus] = useState<SyncStatus>(cloud ? 'loading' : 'local');
-  const applyingRemote = useRef(false);
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [data, setData] = useState<AppData>(() => structuredClone(seedData));
 
   const commitData = useCallback((updater: (d: AppData) => AppData) => {
     setData((d) => upsertTodayKPISnapshot(updater(d)));
   }, []);
 
   useEffect(() => {
-    if (cloud) return;
     setData((d) => upsertTodayKPISnapshot(d));
-  }, [cloud]);
-
-  useEffect(() => {
-    if (cloud) return;
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-    } catch {
-      // non-fatal
-    }
-  }, [data, cloud]);
-
-  useEffect(() => {
-    if (!cloud || !authed || !supabase) return;
-    const sb = supabase;
-    let active = true;
-    setSyncStatus('loading');
-
-    (async () => {
-      const { data: row, error } = await sb
-        .from(STATE_TABLE)
-        .select('data')
-        .eq('id', STATE_ROW_ID)
-        .maybeSingle();
-      if (!active) return;
-
-      if (!error && row?.data) {
-        applyingRemote.current = true;
-        const normalized = normalizeData(row.data as AppData);
-        setData(isStaleData(normalized) ? structuredClone(seedData) : normalized);
-      } else if (!error) {
-        const seed = structuredClone(seedData);
-        await sb.from(STATE_TABLE).upsert({
-          id: STATE_ROW_ID,
-          data: seed,
-          updated_at: new Date().toISOString(),
-        });
-        applyingRemote.current = true;
-        setData(seed);
-      }
-      setSynced(true);
-      setSyncStatus(error ? 'error' : 'saved');
-    })();
-
-    const channel = sb
-      .channel('steam_trap_sync')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: STATE_TABLE, filter: `id=eq.${STATE_ROW_ID}` },
-        (payload) => {
-          const incoming = (payload.new as { data?: AppData } | null)?.data;
-          if (incoming) {
-            applyingRemote.current = true;
-            const normalized = normalizeData(incoming);
-            setData(isStaleData(normalized) ? structuredClone(seedData) : normalized);
-            setSyncStatus('saved');
-          }
-        },
-      )
-      .subscribe();
-
-    return () => {
-      active = false;
-      sb.removeChannel(channel);
-    };
-  }, [cloud, authed]);
-
-  useEffect(() => {
-    if (!cloud || !authed || !synced || !supabase) return;
-    if (applyingRemote.current) {
-      applyingRemote.current = false;
-      return;
-    }
-    const sb = supabase;
-    setSyncStatus('saving');
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    const snapshot = data;
-    saveTimer.current = setTimeout(() => {
-      sb.from(STATE_TABLE)
-        .upsert({ id: STATE_ROW_ID, data: snapshot, updated_at: new Date().toISOString() })
-        .then(({ error }) => setSyncStatus(error ? 'error' : 'saved'));
-    }, 400);
-    return () => {
-      if (saveTimer.current) clearTimeout(saveTimer.current);
-    };
-  }, [data, cloud, authed, synced]);
+  }, []);
 
   const getEquipment = useCallback(
     (id: string) => data.equipment.find((e) => e.id === id),
@@ -336,14 +173,14 @@ export function SteamTrapProvider({ children }: { children: ReactNode }) {
     const created: Equipment = { ...e, id: uid('eq') };
     commitData((d) => ({ ...d, equipment: [...d.equipment, created] }));
     return created;
-  }, []);
+  }, [commitData]);
 
   const updateEquipment = useCallback((id: string, patch: Partial<Omit<Equipment, 'id'>>) => {
     commitData((d) => ({
       ...d,
       equipment: d.equipment.map((e) => (e.id === id ? { ...e, ...patch } : e)),
     }));
-  }, []);
+  }, [commitData]);
 
   const deleteEquipment = useCallback((id: string) => {
     commitData((d) => {
@@ -358,20 +195,20 @@ export function SteamTrapProvider({ children }: { children: ReactNode }) {
         engineering_reviews: d.engineering_reviews.filter((r) => !trapIds.has(r.trap_id)),
       };
     });
-  }, []);
+  }, [commitData]);
 
   const addTrap = useCallback((t: Omit<Trap, 'id'>) => {
     const created: Trap = { ...DEFAULT_TRAP_DATASHEET, ...t, id: uid('tr') };
     commitData((d) => ({ ...d, traps: [...d.traps, created] }));
     return created;
-  }, []);
+  }, [commitData]);
 
   const updateTrap = useCallback((id: string, patch: Partial<Omit<Trap, 'id'>>) => {
     commitData((d) => ({
       ...d,
       traps: d.traps.map((t) => (t.id === id ? { ...t, ...patch } : t)),
     }));
-  }, []);
+  }, [commitData]);
 
   const deleteTrap = useCallback((id: string) => {
     commitData((d) => ({
@@ -382,7 +219,7 @@ export function SteamTrapProvider({ children }: { children: ReactNode }) {
       shutdown_deferrals: d.shutdown_deferrals.filter((r) => r.trap_id !== id),
       engineering_reviews: d.engineering_reviews.filter((r) => r.trap_id !== id),
     }));
-  }, []);
+  }, [commitData]);
 
   const addPM = useCallback(
     (
@@ -427,7 +264,7 @@ export function SteamTrapProvider({ children }: { children: ReactNode }) {
 
       return result;
     },
-    [],
+    [commitData],
   );
 
   const updatePM = useCallback(
@@ -480,7 +317,7 @@ export function SteamTrapProvider({ children }: { children: ReactNode }) {
 
       return result;
     },
-    [],
+    [commitData],
   );
 
   const deletePM = useCallback((id: string) => {
@@ -488,7 +325,7 @@ export function SteamTrapProvider({ children }: { children: ReactNode }) {
       ...d,
       pm_records: d.pm_records.filter((r) => r.id !== id),
     }));
-  }, []);
+  }, [commitData]);
 
   const addMaintenance = useCallback(
     (
@@ -521,7 +358,7 @@ export function SteamTrapProvider({ children }: { children: ReactNode }) {
       }));
       return record;
     },
-    [],
+    [commitData],
   );
 
   const updateMaintenance = useCallback(
@@ -555,7 +392,7 @@ export function SteamTrapProvider({ children }: { children: ReactNode }) {
         ),
       }));
     },
-    [],
+    [commitData],
   );
 
   const deleteMaintenance = useCallback((id: string) => {
@@ -563,7 +400,7 @@ export function SteamTrapProvider({ children }: { children: ReactNode }) {
       ...d,
       maintenance_records: d.maintenance_records.filter((r) => r.id !== id),
     }));
-  }, []);
+  }, [commitData]);
 
   const addShutdownDeferral = useCallback(
     (
@@ -590,7 +427,7 @@ export function SteamTrapProvider({ children }: { children: ReactNode }) {
       }));
       return record;
     },
-    [],
+    [commitData],
   );
 
   const updateShutdownDeferral = useCallback(
@@ -618,7 +455,7 @@ export function SteamTrapProvider({ children }: { children: ReactNode }) {
         ),
       }));
     },
-    [],
+    [commitData],
   );
 
   const deleteShutdownDeferral = useCallback((id: string) => {
@@ -626,7 +463,7 @@ export function SteamTrapProvider({ children }: { children: ReactNode }) {
       ...d,
       shutdown_deferrals: d.shutdown_deferrals.filter((r) => r.id !== id),
     }));
-  }, []);
+  }, [commitData]);
 
   const addEngineeringReview = useCallback(
     (
@@ -659,7 +496,7 @@ export function SteamTrapProvider({ children }: { children: ReactNode }) {
       }));
       return record;
     },
-    [],
+    [commitData],
   );
 
   const updateEngineeringReview = useCallback(
@@ -700,7 +537,7 @@ export function SteamTrapProvider({ children }: { children: ReactNode }) {
         }),
       }));
     },
-    [],
+    [commitData],
   );
 
   const deleteEngineeringReview = useCallback((id: string) => {
@@ -708,18 +545,13 @@ export function SteamTrapProvider({ children }: { children: ReactNode }) {
       ...d,
       engineering_reviews: d.engineering_reviews.filter((r) => r.id !== id),
     }));
-  }, []);
+  }, [commitData]);
 
-  const resetToSeed = useCallback(
-    () => setData(structuredClone(seedData)),
-    [],
-  );
-  const clearAll = useCallback(() => setData(structuredClone(EMPTY_DATA)), []);
+  const resetToSeed = useCallback(() => setData(structuredClone(seedData)), []);
 
   const value = useMemo<SteamTrapContextValue>(
     () => ({
       data,
-      syncStatus,
       getEquipment,
       getTrap,
       trapsForEquipment,
@@ -742,11 +574,9 @@ export function SteamTrapProvider({ children }: { children: ReactNode }) {
       updateEngineeringReview,
       deleteEngineeringReview,
       resetToSeed,
-      clearAll,
     }),
     [
       data,
-      syncStatus,
       getEquipment,
       getTrap,
       trapsForEquipment,
@@ -769,7 +599,6 @@ export function SteamTrapProvider({ children }: { children: ReactNode }) {
       updateEngineeringReview,
       deleteEngineeringReview,
       resetToSeed,
-      clearAll,
     ],
   );
 

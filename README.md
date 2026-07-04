@@ -3,12 +3,11 @@
 Preventive maintenance tracking for industrial steam traps — built with the **same
 stack and patterns as the PSV Tracking Dashboard** in this repository.
 
-## Stack (identical to PSV dashboard)
+## Stack
 
 - [Vite](https://vitejs.dev/) + [React 18](https://react.dev/) + TypeScript
 - [Tailwind CSS](https://tailwindcss.com/) — Texas A&M maroon theme
 - [React Router](https://reactrouter.com/) for navigation
-- [Supabase](https://supabase.com/) — optional cloud auth + shared realtime data
 - [lucide-react](https://lucide.dev/) icons
 
 ## Getting started
@@ -20,20 +19,9 @@ npm run build    # type-check + production build
 npm run preview  # preview the production build
 ```
 
-### Local mode (no Supabase)
-
-Without `VITE_SUPABASE_*` env vars:
-
-- Static login: `admin` / `tamu-steam-2026`
-- Data in browser `localStorage`
-- Demo dataset auto-seeded on first load
-
-### Cloud mode (Supabase)
-
-1. Run `supabase/schema.sql` in your Supabase SQL Editor
-2. Create a user under **Authentication → Users**
-3. Copy `.env.example` → `.env` and set `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY`
-4. Sign in with your Supabase user — everyone shares the same live dataset
+No login or environment variables are required. The app opens directly to the dashboard
+with a shared demo dataset. Visitors can interact with the full UI — add equipment, log
+PM records, export reports — but changes are not persisted between page loads.
 
 ## Data model
 
