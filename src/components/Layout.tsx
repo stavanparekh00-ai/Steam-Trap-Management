@@ -1,13 +1,12 @@
 import { useState } from 'react';
 import { Link, Outlet, useLocation } from 'react-router-dom';
-import { Database, Droplets, Gauge, RotateCcw, Settings, Table2 } from 'lucide-react';
+import { Database, Droplets, Gauge, RotateCcw, Table2 } from 'lucide-react';
 import { useSteamTrap } from '../store/SteamTrapContext';
 
 const NAV = [
   { to: '/', label: 'Dashboard', icon: Gauge },
   { to: '/equipment', label: 'Equipment', icon: Database },
   { to: '/traps', label: 'Traps', icon: Droplets },
-  { to: '/settings', label: 'Settings', icon: Settings },
   { to: '/reporting', label: 'Reporting', icon: Table2 },
 ];
 
